@@ -129,13 +129,19 @@ const AIChat = memo(function AIChat({
   };
 
   const processMessage = async (messageContent: string) => {
-    if (!messageContent.trim() || !chatState.hasApiKey) return;
+    // Get agent ID first, before any state changes
+    const currentAgentId = chatActions.getCurrentAgentId();
+    const isAcp = isAcpAgent(currentAgentId);
+
+    // ACP agents don't need API key, they handle their own auth
+    if (!messageContent.trim() || (!isAcp && !chatState.hasApiKey)) return;
 
     // Agents are started automatically by AcpStreamHandler when needed
 
     let chatId = chatState.currentChatId;
     if (!chatId) {
-      chatId = chatActions.createNewChat();
+      // Pass the current agent ID to ensure the new chat uses the correct agent
+      chatId = chatActions.createNewChat(currentAgentId);
     }
 
     const { processedMessage } = await parseMentionsAndLoadFiles(
@@ -363,7 +369,11 @@ details: ${errorDetails || mainError}
 
   const sendMessage = useCallback(
     async (messageContent: string) => {
-      if (!messageContent.trim() || !chatState.hasApiKey) return;
+      const currentAgentId = chatActions.getCurrentAgentId();
+      const isAcp = isAcpAgent(currentAgentId);
+
+      // ACP agents don't need API key, they handle their own auth
+      if (!messageContent.trim() || (!isAcp && !chatState.hasApiKey)) return;
 
       chatActions.setInput("");
 
@@ -390,7 +400,9 @@ details: ${errorDetails || mainError}
 
   return (
     <div
-      className={`ui-font flex h-full flex-col bg-secondary-bg text-text text-xs ${className || ""}`}
+      className={`ui-font flex h-full flex-col bg-secondary-bg text-text text-xs ${
+        className || ""
+      }`}
     >
       <ChatHeader />
 

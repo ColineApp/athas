@@ -77,10 +77,16 @@ export const useAIChatStore = create<AIChatState & AIChatActions>()(
 
         getCurrentAgentId: () => {
           const state = get();
-          // If there's a current chat, return its agent
+          // If there's a current chat, return its agent and sync selectedAgentId
           if (state.currentChatId) {
             const chat = state.chats.find((c) => c.id === state.currentChatId);
             if (chat?.agentId) {
+              // Sync selectedAgentId to match current chat's agent for consistency
+              if (state.selectedAgentId !== chat.agentId) {
+                set((s) => {
+                  s.selectedAgentId = chat.agentId;
+                });
+              }
               return chat.agentId;
             }
           }
@@ -212,6 +218,8 @@ export const useAIChatStore = create<AIChatState & AIChatActions>()(
             state.chats.unshift(newChat);
             state.currentChatId = newChat.id;
             state.isChatHistoryVisible = false;
+            // Sync selectedAgentId to match the new chat's agent
+            state.selectedAgentId = chatAgentId;
             // Clear input and reset state when creating new chat
             state.input = "";
             state.isTyping = false;
@@ -225,9 +233,14 @@ export const useAIChatStore = create<AIChatState & AIChatActions>()(
         },
 
         switchToChat: (chatId) => {
+          const chat = get().chats.find((c) => c.id === chatId);
           set((state) => {
             state.currentChatId = chatId;
             state.isChatHistoryVisible = false;
+            // Sync selectedAgentId to match the chat's agent
+            if (chat?.agentId) {
+              state.selectedAgentId = chat.agentId;
+            }
             // Clear input and reset state when switching chats
             state.input = "";
             state.isTyping = false;

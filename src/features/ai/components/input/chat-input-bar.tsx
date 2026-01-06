@@ -11,6 +11,7 @@ import Button from "@/ui/button";
 import { cn } from "@/utils/cn";
 import { FileMentionDropdown } from "../mentions/file-mention-dropdown";
 import { SlashCommandDropdown } from "../mentions/slash-command-dropdown";
+import { AgentModelSelector } from "../selectors/agent-model-selector";
 import { ChatModeSelector } from "../selectors/chat-mode-selector";
 import { ContextSelector } from "../selectors/context-selector";
 import { ModelSelectorDropdown } from "../selectors/model-selector-dropdown";
@@ -679,7 +680,10 @@ const AIChatInputBar = memo(function AIChatInputBar({
                 hasApiKey={(providerId) => useAIChatStore.getState().hasProviderApiKey(providerId)}
               />
             ) : (
-              <SessionModeSelector />
+              <>
+                <AgentModelSelector />
+                <SessionModeSelector />
+              </>
             )}
 
             <Button

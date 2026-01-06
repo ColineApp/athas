@@ -375,6 +375,8 @@ fn main() {
          respond_acp_permission,
          set_acp_session_mode,
          cancel_acp_prompt,
+         get_agent_settings,
+         set_agent_settings,
          // Theme commands
          get_system_theme,
          load_toml_themes,

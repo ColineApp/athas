@@ -1,5 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
-import { Check, ChevronDown, Download, History, Plus, Terminal } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Download,
+  History,
+  LogIn,
+  Plus,
+  RefreshCw,
+  Terminal,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AgentConfig } from "@/features/ai/types/acp";
 import { AGENT_OPTIONS, type AgentType } from "@/features/ai/types/ai-chat";
@@ -11,14 +20,18 @@ type PackageManager = "bun" | "npm" | "pnpm" | "yarn";
 
 const AGENT_INSTALL_HINTS: Record<
   string,
-  { package?: string; command?: string; type?: "npm" | "pip" | "shell" }
+  { package?: string; command?: string; type?: "npm" | "pip" | "shell"; loginCommand?: string }
 > = {
-  "claude-code": { package: "@anthropic-ai/claude-code", type: "npm" },
-  "codex-cli": { package: "@openai/codex", type: "npm" },
-  "gemini-cli": { package: "@google/gemini-cli", type: "npm" },
-  "kimi-cli": { package: "kimi-cli", type: "npm" },
-  opencode: { command: "curl -fsSL https://opencode.ai/install | bash", type: "shell" },
-  "qwen-code": { command: "pip install qwen-code", type: "pip" },
+  "claude-code": { package: "@anthropic-ai/claude-code", type: "npm", loginCommand: "claude" },
+  "codex-cli": { package: "@openai/codex", type: "npm", loginCommand: "codex auth login" },
+  "gemini-cli": { package: "@google/gemini-cli", type: "npm", loginCommand: "gemini" },
+  "kimi-cli": { package: "kimi-cli", type: "npm", loginCommand: "kimi auth login" },
+  opencode: {
+    command: "curl -fsSL https://opencode.ai/install | bash",
+    type: "shell",
+    loginCommand: "opencode auth",
+  },
+  "qwen-code": { command: "pip install qwen-code", type: "pip", loginCommand: "qwen-code auth" },
 };
 
 const getInstallCommand = (pkg: string, pm: PackageManager): string => {
@@ -119,29 +132,43 @@ export function ChatHeader() {
   const [installedAgents, setInstalledAgents] = useState<Set<string>>(new Set(["custom"]));
   const [packageManager, setPackageManager] = useState<PackageManager>("bun");
   const [pmDropdownAgent, setPmDropdownAgent] = useState<string | null>(null);
+  const [pendingLogin, setPendingLogin] = useState<{ agentId: string; agentName: string } | null>(
+    null,
+  );
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const currentChat = getCurrentChat();
   const currentAgentId = getCurrentAgentId();
   const currentAgent = AGENT_OPTIONS.find((a) => a.id === currentAgentId);
 
+  // Function to detect installed agents
+  const detectAgents = async () => {
+    try {
+      setIsRefreshing(true);
+      const availableAgents = await invoke<AgentConfig[]>("get_available_agents");
+      const installed = new Set<string>(["custom"]);
+      for (const agent of availableAgents) {
+        if (agent.installed) {
+          installed.add(agent.id);
+        }
+      }
+      setInstalledAgents(installed);
+    } catch (error) {
+      console.error("Failed to detect agents:", error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   // Detect installed agents on mount
   useEffect(() => {
-    const detectAgents = async () => {
-      try {
-        const availableAgents = await invoke<AgentConfig[]>("get_available_agents");
-        const installed = new Set<string>(["custom"]);
-        for (const agent of availableAgents) {
-          if (agent.installed) {
-            installed.add(agent.id);
-          }
-        }
-        setInstalledAgents(installed);
-      } catch (error) {
-        console.error("Failed to detect agents:", error);
-      }
-    };
     detectAgents();
   }, []);
+
+  // Handle refresh button click
+  const handleRefreshAgents = async () => {
+    await detectAgents();
+  };
 
   const handleNewChat = async (agentId: AgentType) => {
     if (!installedAgents.has(agentId) && agentId !== "custom") return;
@@ -182,7 +209,34 @@ export function ChatHeader() {
       }),
     );
 
+    // Set pending login so user can login after installation
+    if (hint.loginCommand) {
+      setPendingLogin({ agentId, agentName });
+    }
+
     setIsNewChatMenuOpen(false);
+  };
+
+  const handleLogin = (agentId: string, agentName: string) => {
+    const hint = AGENT_INSTALL_HINTS[agentId];
+    if (!hint?.loginCommand) return;
+
+    // Create a new terminal and run the login command
+    window.dispatchEvent(
+      new CustomEvent("create-terminal-with-command", {
+        detail: { command: hint.loginCommand, name: `Login to ${agentName}` },
+      }),
+    );
+
+    setPendingLogin(null);
+    // Refresh agents after a short delay to pick up the newly installed agent
+    setTimeout(() => detectAgents(), 2000);
+  };
+
+  const handleDismissPendingLogin = () => {
+    setPendingLogin(null);
+    // Still refresh to detect the installed agent
+    detectAgents();
   };
 
   const handleSelectPm = (pm: PackageManager, e: React.MouseEvent) => {
@@ -194,7 +248,7 @@ export function ChatHeader() {
   const packageManagers: PackageManager[] = ["bun", "npm", "pnpm", "yarn"];
 
   return (
-    <div className="flex items-center gap-2 border-border border-b bg-secondary-bg px-1.5 py-0.5">
+    <div className="relative flex items-center gap-2 border-border border-b bg-secondary-bg px-1.5 py-0.5">
       {/* Agent indicator */}
       <div className="flex items-center gap-1 rounded bg-primary-bg px-1.5 py-0.5 text-xs">
         <Terminal size={10} className="text-text-lighter" />
@@ -239,7 +293,23 @@ export function ChatHeader() {
           <>
             <div className="fixed inset-0 z-9998" onClick={() => setIsNewChatMenuOpen(false)} />
             <div className="absolute top-full right-0 z-9999 mt-1 w-[280px] rounded-lg border border-border bg-primary-bg py-1 shadow-xl">
-              <div className="px-3 py-1.5 text-text-lighter text-xs">New Chat with...</div>
+              <div className="flex items-center justify-between px-3 py-1.5">
+                <span className="text-text-lighter text-xs">New Chat with...</span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRefreshAgents();
+                  }}
+                  className={cn(
+                    "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-text-lighter transition-colors hover:bg-hover hover:text-text",
+                    isRefreshing && "animate-spin",
+                  )}
+                  title="Refresh installed agents"
+                >
+                  <RefreshCw size={10} className={isRefreshing ? "animate-spin" : ""} />
+                  {!isRefreshing && <span>Refresh</span>}
+                </button>
+              </div>
               {AGENT_OPTIONS.map((agent) => {
                 const isInstalled = installedAgents.has(agent.id);
                 const installHint = AGENT_INSTALL_HINTS[agent.id];
@@ -248,7 +318,7 @@ export function ChatHeader() {
                   !isInstalled && agent.id !== "custom" && installHint?.type === "npm";
 
                 return (
-                  <div key={agent.id} className="relative">
+                  <div key={agent.id} className="group relative">
                     <button
                       onClick={() => handleNewChat(agent.id)}
                       disabled={!isInstalled && agent.id !== "custom"}
@@ -320,6 +390,31 @@ export function ChatHeader() {
           </>
         )}
       </div>
+
+      {/* Floating pending login popup */}
+      {pendingLogin && (
+        <div className="absolute top-full right-2 z-50 mt-1 w-[260px] rounded-lg border border-accent/30 bg-primary-bg p-3 shadow-xl">
+          <div className="mb-1.5 text-text text-xs">
+            <strong>{pendingLogin.agentName}</strong> installed!
+          </div>
+          <div className="mb-2 text-[10px] text-text-light">Login to start using this agent.</div>
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => handleLogin(pendingLogin.agentId, pendingLogin.agentName)}
+              className="flex items-center gap-1 rounded bg-accent px-2 py-1 text-[10px] text-white transition-colors hover:bg-accent/80"
+            >
+              <LogIn size={10} />
+              Login
+            </button>
+            <button
+              onClick={handleDismissPendingLogin}
+              className="rounded px-2 py-1 text-[10px] text-text-light transition-colors hover:bg-hover"
+            >
+              Later
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
