@@ -385,7 +385,8 @@ export function Editor({
     aiHasMultilineSuggestion &&
     !foldTransform.hasActiveFolds &&
     aiCursorOffset !== null &&
-    aiVisualCursorLine !== null;
+    aiCursorLine !== null &&
+    aiCursorColumn !== null;
 
   useEffect(() => {
     if (
@@ -1144,14 +1145,15 @@ export function Editor({
           (aiUsePreviewLayer ? (
             <InlineCompletionPreviewLayer
               ref={inlineCompletionRef}
-              content={content}
+              lines={actualLines}
               suggestion={aiSuggestion}
-              cursorOffset={aiCursorOffset ?? 0}
-              cursorLine={aiVisualCursorLine}
+              cursorLine={aiCursorLine ?? 0}
+              cursorColumn={aiCursorColumn ?? 0}
               fontSize={fontSize}
               fontFamily={fontFamily}
               lineHeight={lineHeight}
               tabSize={tabSize}
+              viewportRange={viewportRange}
             />
           ) : (
             <InlineCompletionLayer

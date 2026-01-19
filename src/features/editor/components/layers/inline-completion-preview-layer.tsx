@@ -1,78 +1,111 @@
 import { forwardRef, memo, useMemo } from "react";
+import type { ViewportRange } from "@/features/editor/hooks/use-viewport-lines";
 
 interface InlineCompletionPreviewLayerProps {
-  content: string;
+  lines: string[];
   suggestion: string;
-  cursorOffset: number;
   cursorLine: number;
+  cursorColumn: number;
   fontSize: number;
   fontFamily: string;
   lineHeight: number;
   tabSize: number;
+  viewportRange?: ViewportRange;
 }
 
-const buildLineOffsets = (lines: string[]) => {
-  const offsets: number[] = new Array(lines.length);
-  let offset = 0;
-  for (let i = 0; i < lines.length; i++) {
-    offsets[i] = offset;
-    offset += lines[i].length + 1;
-  }
-  return offsets;
-};
+const MAX_PREVIEW_LINES = 200;
+const EMPTY_LINE = "\u00A0";
 
 const InlineCompletionPreviewLayerComponent = forwardRef<
   HTMLDivElement,
   InlineCompletionPreviewLayerProps
 >(
   (
-    { content, suggestion, cursorOffset, cursorLine, fontSize, fontFamily, lineHeight, tabSize },
+    {
+      lines,
+      suggestion,
+      cursorLine,
+      cursorColumn,
+      fontSize,
+      fontFamily,
+      lineHeight,
+      tabSize,
+      viewportRange,
+    },
     ref,
   ) => {
-    const previewContent = useMemo(() => {
-      if (!suggestion) return content;
-      return content.slice(0, cursorOffset) + suggestion + content.slice(cursorOffset);
-    }, [content, suggestion, cursorOffset]);
+    const suggestionLines = useMemo(() => suggestion.split("\n"), [suggestion]);
 
-    const previewLines = useMemo(() => previewContent.split("\n"), [previewContent]);
-    const lineOffsets = useMemo(() => buildLineOffsets(previewLines), [previewLines]);
-
-    const insertStart = cursorOffset;
-    const insertEnd = cursorOffset + suggestion.length;
-    const startLine = Math.min(Math.max(cursorLine, 0), previewLines.length - 1);
+    const startLine = Math.min(Math.max(cursorLine, 0), lines.length - 1);
+    const endLine = useMemo(() => {
+      if (lines.length === 0) return 0;
+      if (viewportRange) {
+        return Math.min(viewportRange.endLine, lines.length - 1);
+      }
+      return Math.min(lines.length - 1, startLine + MAX_PREVIEW_LINES);
+    }, [lines.length, startLine, viewportRange]);
 
     const renderedLines = useMemo(() => {
+      if (!suggestion) return [];
       const result = [];
-      for (let i = startLine; i < previewLines.length; i++) {
-        const line = previewLines[i];
-        const lineStart = lineOffsets[i];
-        const lineEnd = lineStart + line.length;
-        const ghostStart = Math.max(lineStart, insertStart);
-        const ghostEnd = Math.min(lineEnd, insertEnd);
 
-        if (ghostStart >= ghostEnd) {
-          result.push(
-            <div key={`preview-line-${i}`} className="inline-completion-preview-line">
-              {line || "\u00A0"}
-            </div>,
-          );
-          continue;
-        }
+      const currentLine = lines[startLine] || "";
+      const before = currentLine.slice(0, cursorColumn);
+      const after = currentLine.slice(cursorColumn);
 
-        const prefix = line.slice(0, ghostStart - lineStart);
-        const ghost = line.slice(ghostStart - lineStart, ghostEnd - lineStart);
-        const suffix = line.slice(ghostEnd - lineStart);
+      const insertLineCount = suggestionLines.length;
+      const lastInsertIndex = Math.max(0, insertLineCount - 1);
 
+      const firstGhost = suggestionLines[0] ?? "";
+      const lastGhost = suggestionLines[lastInsertIndex] ?? "";
+
+      result.push(
+        <div key={`preview-line-${startLine}-0`} className="inline-completion-preview-line">
+          {before || null}
+          <span className="inline-completion-preview-ghost">{firstGhost || EMPTY_LINE}</span>
+        </div>,
+      );
+
+      for (let i = 1; i < lastInsertIndex; i++) {
+        const ghost = suggestionLines[i] ?? "";
         result.push(
-          <div key={`preview-line-${i}`} className="inline-completion-preview-line">
-            {prefix || null}
-            <span className="inline-completion-preview-ghost">{ghost || "\u00A0"}</span>
-            {suffix || null}
+          <div key={`preview-line-${startLine}-${i}`} className="inline-completion-preview-line">
+            <span className="inline-completion-preview-ghost">{ghost || EMPTY_LINE}</span>
           </div>,
         );
       }
+
+      if (insertLineCount > 1) {
+        result.push(
+          <div
+            key={`preview-line-${startLine}-${lastInsertIndex}`}
+            className="inline-completion-preview-line"
+          >
+            <span className="inline-completion-preview-ghost">{lastGhost || EMPTY_LINE}</span>
+            {after || null}
+          </div>,
+        );
+      } else if (after) {
+        result.push(
+          <div key={`preview-line-${startLine}-suffix`} className="inline-completion-preview-line">
+            {after}
+          </div>,
+        );
+      }
+
+      const trailingStart = startLine + 1;
+      const trailingEnd = Math.min(endLine, lines.length - 1);
+      for (let i = trailingStart; i <= trailingEnd; i++) {
+        const line = lines[i] ?? "";
+        result.push(
+          <div key={`preview-line-${i}`} className="inline-completion-preview-line">
+            {line || EMPTY_LINE}
+          </div>,
+        );
+      }
+
       return result;
-    }, [previewLines, lineOffsets, insertStart, insertEnd, startLine]);
+    }, [lines, suggestion, suggestionLines, startLine, endLine, cursorColumn]);
 
     return (
       <div
