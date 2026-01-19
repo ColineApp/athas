@@ -1,6 +1,7 @@
 import type React from "react";
 import { useEffect, useRef } from "react";
 import { CsvPreview } from "@/extensions/viewers/csv/csv-preview";
+import { useAiAutocomplete } from "@/features/editor/hooks/use-ai-autocomplete";
 import { useLspIntegration } from "@/features/editor/hooks/use-lsp-integration";
 import { useEditorScroll } from "@/features/editor/hooks/use-scroll";
 import { useBufferStore } from "@/features/editor/stores/buffer-store";
@@ -116,6 +117,7 @@ const CodeEditor = ({ className }: CodeEditorProps) => {
 
   // Get cursor position for LSP integration
   const cursorPosition = useEditorStateStore.use.cursorPosition();
+  const isLspCompletionVisible = useEditorUIStore.use.isLspCompletionVisible();
 
   // Consolidated LSP integration (document lifecycle, completions, hover, go-to-definition)
   const { hoverHandlers, goToDefinitionHandlers, definitionLinkHandlers } = useLspIntegration({
@@ -125,6 +127,14 @@ const CodeEditor = ({ className }: CodeEditorProps) => {
     editorRef,
     fontSize: zoomedFontSize,
     lineNumbers: settings.lineNumbers,
+  });
+
+  useAiAutocomplete({
+    bufferId: activeBufferId,
+    filePath,
+    value,
+    cursorPosition,
+    isLspCompletionVisible,
   });
 
   // Combine mouse move handlers for hover and definition link

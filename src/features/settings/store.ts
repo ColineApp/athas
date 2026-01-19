@@ -44,6 +44,7 @@ interface Settings {
   aiChatWidth: number;
   isAIChatVisible: boolean;
   aiCompletion: boolean;
+  aiAutocompleteProviderId: string;
   aiAutoOpenReadFiles: boolean;
   aiTemperature: number;
   aiMaxTokens: number;
@@ -119,7 +120,8 @@ const defaultSettings: Settings = {
   aiModelId: "gpt-4o-mini",
   aiChatWidth: 400,
   isAIChatVisible: false,
-  aiCompletion: true,
+  aiCompletion: false,
+  aiAutocompleteProviderId: "coline-tab",
   aiAutoOpenReadFiles: true,
   aiTemperature: 0.7,
   aiMaxTokens: 4096,

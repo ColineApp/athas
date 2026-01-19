@@ -79,6 +79,60 @@
   -ms-overflow-style: none;
 }
 
+/* Inline AI completion layer */
+.inline-completion-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+  padding: var(--editor-padding-top) var(--editor-padding-right) var(--editor-padding-bottom)
+    var(--editor-padding-left);
+  color: var(--text-lighter, rgba(212, 212, 212, 0.6));
+  white-space: pre;
+  word-wrap: break-word;
+}
+
+.inline-completion-content {
+  position: relative;
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+.inline-completion-line {
+  position: absolute;
+  white-space: pre;
+}
+
+/* Inline AI completion preview (multiline with line gaps) */
+.inline-completion-preview-layer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 3;
+  padding: var(--editor-padding-top) var(--editor-padding-right) var(--editor-padding-bottom)
+    var(--editor-padding-left);
+  background: var(--primary-bg, #0f0f0f);
+  color: var(--text, #d4d4d4);
+  white-space: pre;
+  word-wrap: break-word;
+}
+
+.inline-completion-preview-content {
+  position: relative;
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+.inline-completion-preview-line {
+  white-space: pre;
+}
+
+.inline-completion-preview-ghost {
+  color: var(--text-lighter, rgba(212, 212, 212, 0.6));
+}
+
 /* Selection styling for the input layer */
 .input-layer::selection {
   background: var(--selection-bg, rgba(38, 79, 120, 0.6));

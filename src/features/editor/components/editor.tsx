@@ -15,6 +15,7 @@ import { usePerformanceMonitor } from "../hooks/use-performance";
 import { getLanguageId, useTokenizer } from "../hooks/use-tokenizer";
 import { useViewportLines } from "../hooks/use-viewport-lines";
 import { useLspStore } from "../lsp/lsp-store";
+import { useAiCompletionStore } from "../stores/ai-completion-store";
 import { useBufferStore } from "../stores/buffer-store";
 import { useEditorDecorationsStore } from "../stores/decorations-store";
 import { useFoldStore } from "../stores/fold-store";
@@ -33,11 +34,22 @@ import { Gutter } from "./gutter/gutter";
 import { DefinitionLinkLayer } from "./layers/definition-link-layer";
 import { GitBlameLayer } from "./layers/git-blame-layer";
 import { HighlightLayer } from "./layers/highlight-layer";
+import { InlineCompletionLayer } from "./layers/inline-completion-layer";
+import { InlineCompletionPreviewLayer } from "./layers/inline-completion-preview-layer";
 import { InputLayer } from "./layers/input-layer";
 import { MultiCursorLayer } from "./layers/multi-cursor-layer";
 import { SearchHighlightLayer } from "./layers/search-highlight-layer";
 import { VimCursorLayer } from "./layers/vim-cursor-layer";
 import { Minimap } from "./minimap/minimap";
+
+const getNextSuggestionChunk = (suggestion: string): string => {
+  if (!suggestion) return "";
+  const wordMatch = suggestion.match(/^\s*\w+/);
+  if (wordMatch?.[0]) return wordMatch[0];
+  const nonWordMatch = suggestion.match(/^\s*\W+/);
+  if (nonWordMatch?.[0]) return nonWordMatch[0];
+  return suggestion[0] || "";
+};
 
 interface EditorProps {
   className?: string;
@@ -56,6 +68,7 @@ export function Editor({
 }: EditorProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
+  const inlineCompletionRef = useRef<HTMLDivElement>(null);
   const multiCursorRef = useRef<HTMLDivElement>(null);
   const searchHighlightRef = useRef<HTMLDivElement>(null);
   const vimCursorRef = useRef<HTMLDivElement>(null);
@@ -340,9 +353,68 @@ export function Editor({
   const filteredCompletions = useEditorUIStore.use.filteredCompletions();
   const selectedLspIndex = useEditorUIStore.use.selectedLspIndex();
   const { setSelectedLspIndex, setIsLspCompletionVisible } = useEditorUIStore.use.actions();
+  const aiSuggestion = useAiCompletionStore.use.suggestion();
+  const aiSuggestionVisible = useAiCompletionStore.use.isVisible();
+  const aiSuggestionBufferId = useAiCompletionStore.use.bufferId();
+  const aiCursorOffset = useAiCompletionStore.use.cursorOffset();
+  const aiCursorLine = useAiCompletionStore.use.cursorLine();
+  const aiCursorColumn = useAiCompletionStore.use.cursorColumn();
+  const aiCompletionActions = useAiCompletionStore.use.actions();
+
+  const aiVisualCursorLine = useMemo(() => {
+    if (aiCursorLine === null || aiCursorLine === undefined) return null;
+    if (foldTransform.hasActiveFolds) {
+      return foldTransform.mapping.actualToVirtual.get(aiCursorLine) ?? aiCursorLine;
+    }
+    return aiCursorLine;
+  }, [aiCursorLine, foldTransform]);
+
+  const aiLineTailWhitespace = useMemo(() => {
+    if (aiCursorLine === null || aiCursorLine === undefined) return false;
+    if (aiCursorColumn === null || aiCursorColumn === undefined) return false;
+    const lineContent = actualLines[aiCursorLine] || "";
+    return lineContent.slice(aiCursorColumn).trim().length === 0;
+  }, [aiCursorLine, aiCursorColumn, actualLines]);
+
+  const aiHasMultilineSuggestion = useMemo(
+    () => (aiSuggestion ? aiSuggestion.includes("\n") : false),
+    [aiSuggestion],
+  );
+
+  const aiUsePreviewLayer =
+    aiHasMultilineSuggestion &&
+    !foldTransform.hasActiveFolds &&
+    aiCursorOffset !== null &&
+    aiVisualCursorLine !== null;
+
+  useEffect(() => {
+    if (
+      aiSuggestionVisible &&
+      aiSuggestion &&
+      aiSuggestionBufferId === bufferId &&
+      aiVisualCursorLine !== null &&
+      aiCursorColumn !== null
+    ) {
+      console.log("[AI Autocomplete] render preview", {
+        bufferId,
+        line: aiVisualCursorLine,
+        column: aiCursorColumn,
+        length: aiSuggestion.length,
+      });
+    }
+  }, [
+    aiSuggestionVisible,
+    aiSuggestion,
+    aiSuggestionBufferId,
+    bufferId,
+    aiVisualCursorLine,
+    aiCursorColumn,
+  ]);
   const searchMatches = useEditorUIStore.use.searchMatches();
   const currentMatchIndex = useEditorUIStore.use.currentMatchIndex();
   const lspActions = useLspStore.use.actions();
+  const scrollTop = useEditorStateStore.use.scrollTop();
+  const scrollLeft = useEditorStateStore.use.scrollLeft();
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -592,6 +664,70 @@ export function Editor({
         }
       }
 
+      if (
+        aiSuggestionVisible &&
+        aiSuggestion &&
+        aiSuggestionBufferId === bufferId &&
+        !isLspCompletionVisible
+      ) {
+        const textarea = e.currentTarget;
+        const selectionStart = textarea.selectionStart;
+        const selectionEnd = textarea.selectionEnd;
+
+        if (selectionStart === selectionEnd) {
+          if (e.key === "Tab") {
+            e.preventDefault();
+            const currentContent = textarea.value;
+            const insertText = aiSuggestion;
+            const newContent =
+              currentContent.substring(0, selectionStart) +
+              insertText +
+              currentContent.substring(selectionEnd);
+            textarea.value = newContent;
+            const newCursorPos = selectionStart + insertText.length;
+            textarea.selectionStart = textarea.selectionEnd = newCursorPos;
+            handleInput(newContent);
+            aiCompletionActions.clearSuggestion();
+            return;
+          }
+
+          if ((e.metaKey || e.ctrlKey) && e.key === "ArrowRight") {
+            e.preventDefault();
+            const chunk = getNextSuggestionChunk(aiSuggestion);
+            if (!chunk) return;
+            const currentContent = textarea.value;
+            const newContent =
+              currentContent.substring(0, selectionStart) +
+              chunk +
+              currentContent.substring(selectionEnd);
+            textarea.value = newContent;
+            const newCursorPos = selectionStart + chunk.length;
+            textarea.selectionStart = textarea.selectionEnd = newCursorPos;
+            handleInput(newContent);
+            const remaining = aiSuggestion.slice(chunk.length);
+            if (remaining.length > 0) {
+              const newPosition = calculateCursorPosition(newCursorPos, splitLines(newContent));
+              aiCompletionActions.setSuggestion({
+                suggestion: remaining,
+                bufferId: bufferId || "",
+                cursorOffset: newPosition.offset,
+                cursorLine: newPosition.line,
+                cursorColumn: newPosition.column,
+              });
+            } else {
+              aiCompletionActions.clearSuggestion();
+            }
+            return;
+          }
+        }
+
+        if (e.key === "Escape") {
+          e.preventDefault();
+          aiCompletionActions.clearSuggestion({ reject: true });
+          return;
+        }
+      }
+
       if (isLspCompletionVisible && filteredCompletions.length > 0) {
         const maxIndex = filteredCompletions.length;
 
@@ -689,6 +825,10 @@ export function Editor({
       cursorPosition.line,
       setCursorPosition,
       lines,
+      aiSuggestionVisible,
+      aiSuggestion,
+      aiSuggestionBufferId,
+      aiCompletionActions,
     ],
   );
 
@@ -734,6 +874,10 @@ export function Editor({
             highlightRef.current.style.transform = `translate(-${left}px, -${top}px)`;
           }
 
+          if (inlineCompletionRef.current) {
+            inlineCompletionRef.current.style.transform = `translate(-${left}px, -${top}px)`;
+          }
+
           // Update multi-cursor layer transform for visual sync
           if (multiCursorRef.current) {
             multiCursorRef.current.style.transform = `translate(-${left}px, -${top}px)`;
@@ -766,6 +910,14 @@ export function Editor({
     },
     [bufferId, handleViewportScroll, lines.length],
   );
+
+  useEffect(() => {
+    if (inlineCompletionRef.current) {
+      const currentTop = inputRef.current?.scrollTop ?? scrollTop;
+      const currentLeft = inputRef.current?.scrollLeft ?? scrollLeft;
+      inlineCompletionRef.current.style.transform = `translate(-${currentLeft}px, -${currentTop}px)`;
+    }
+  }, [scrollTop, scrollLeft, aiSuggestionVisible, aiSuggestionBufferId, aiSuggestion]);
 
   useEffect(() => {
     if (inputRef.current) {
@@ -988,6 +1140,37 @@ export function Editor({
             viewportRange={viewportRange}
           />
         )}
+        {aiSuggestionVisible &&
+          aiSuggestion &&
+          aiSuggestionBufferId === bufferId &&
+          aiVisualCursorLine !== null &&
+          aiCursorColumn !== null &&
+          aiLineTailWhitespace &&
+          (aiUsePreviewLayer ? (
+            <InlineCompletionPreviewLayer
+              ref={inlineCompletionRef}
+              content={content}
+              suggestion={aiSuggestion}
+              cursorOffset={aiCursorOffset ?? 0}
+              cursorLine={aiVisualCursorLine}
+              fontSize={fontSize}
+              fontFamily={fontFamily}
+              lineHeight={lineHeight}
+              tabSize={tabSize}
+            />
+          ) : (
+            <InlineCompletionLayer
+              ref={inlineCompletionRef}
+              suggestion={aiSuggestion}
+              cursorLine={aiVisualCursorLine}
+              cursorColumn={aiCursorColumn}
+              lines={lines}
+              fontSize={fontSize}
+              fontFamily={fontFamily}
+              lineHeight={lineHeight}
+              tabSize={tabSize}
+            />
+          ))}
         <InputLayer
           textareaRef={inputRef}
           content={displayContent}
