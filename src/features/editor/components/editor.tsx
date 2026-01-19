@@ -677,15 +677,12 @@ export function Editor({
         if (selectionStart === selectionEnd) {
           if (e.key === "Tab") {
             e.preventDefault();
-            const currentContent = textarea.value;
             const insertText = aiSuggestion;
-            const newContent =
-              currentContent.substring(0, selectionStart) +
-              insertText +
-              currentContent.substring(selectionEnd);
-            textarea.value = newContent;
-            const newCursorPos = selectionStart + insertText.length;
-            textarea.selectionStart = textarea.selectionEnd = newCursorPos;
+            // Use execCommand to insert text so it's part of the undo stack (Cmd+Z works)
+            textarea.focus();
+            document.execCommand("insertText", false, insertText);
+            // Get the new content after insertion
+            const newContent = textarea.value;
             handleInput(newContent);
             aiCompletionActions.clearSuggestion();
             return;
@@ -695,14 +692,12 @@ export function Editor({
             e.preventDefault();
             const chunk = getNextSuggestionChunk(aiSuggestion);
             if (!chunk) return;
-            const currentContent = textarea.value;
-            const newContent =
-              currentContent.substring(0, selectionStart) +
-              chunk +
-              currentContent.substring(selectionEnd);
-            textarea.value = newContent;
-            const newCursorPos = selectionStart + chunk.length;
-            textarea.selectionStart = textarea.selectionEnd = newCursorPos;
+            // Use execCommand to insert text so it's part of the undo stack (Cmd+Z works)
+            textarea.focus();
+            document.execCommand("insertText", false, chunk);
+            // Get the new content and cursor position after insertion
+            const newContent = textarea.value;
+            const newCursorPos = textarea.selectionStart;
             handleInput(newContent);
             const remaining = aiSuggestion.slice(chunk.length);
             if (remaining.length > 0) {
