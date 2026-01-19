@@ -173,7 +173,7 @@ export function EmptyEditorState() {
                   <input
                     ref={inputRef}
                     type="text"
-                    placeholder="command"
+                    placeholder="Command"
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
                     onKeyDown={handleKeyDown}
@@ -223,7 +223,7 @@ export function EmptyEditorState() {
             <input
               ref={inputRef}
               type="text"
-              placeholder="command"
+              placeholder="Command"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
