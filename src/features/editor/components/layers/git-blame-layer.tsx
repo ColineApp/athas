@@ -1,5 +1,7 @@
 import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EDITOR_CONSTANTS } from "@/features/editor/config/constants";
+import { useAiCompletionStore } from "@/features/editor/stores/ai-completion-store";
+import { useBufferStore } from "@/features/editor/stores/buffer-store";
 import { useEditorStateStore } from "@/features/editor/stores/state-store";
 import { splitLines } from "@/features/editor/utils/lines";
 import { InlineGitBlame } from "@/features/version-control/git/components/inline-blame";
@@ -31,6 +33,12 @@ const GitBlameLayerComponent = ({
   // Subscribe to scroll state for reactivity
   const scrollTop = useEditorStateStore.use.scrollTop();
   const scrollLeft = useEditorStateStore.use.scrollLeft();
+  const activeBufferId = useBufferStore.use.activeBufferId();
+  const aiSuggestion = useAiCompletionStore.use.suggestion();
+  const aiSuggestionVisible = useAiCompletionStore.use.isVisible();
+  const aiSuggestionBufferId = useAiCompletionStore.use.bufferId();
+  const aiCursorLine = useAiCompletionStore.use.cursorLine();
+  const aiCursorColumn = useAiCompletionStore.use.cursorColumn();
 
   const { getBlameForLine } = useGitBlame(filePath);
   const blameLine = getBlameForLine(cursorLine);
@@ -39,6 +47,25 @@ const GitBlameLayerComponent = ({
 
   const lines = useMemo(() => splitLines(visualContent), [visualContent]);
   const currentLineContent = lines[visualCursorLine] || "";
+  const ghostFirstLine = aiSuggestion ? (aiSuggestion.split("\n")[0] ?? "") : "";
+
+  const shouldShiftForGhost =
+    aiSuggestionVisible &&
+    !!ghostFirstLine &&
+    aiSuggestionBufferId === activeBufferId &&
+    aiCursorLine === cursorLine &&
+    aiCursorColumn !== null &&
+    aiCursorColumn !== undefined;
+
+  const effectiveLineContent = useMemo(() => {
+    if (!shouldShiftForGhost) return currentLineContent;
+    const safeColumn = Math.min(Math.max(aiCursorColumn ?? 0, 0), currentLineContent.length);
+    return (
+      currentLineContent.slice(0, safeColumn) +
+      ghostFirstLine +
+      currentLineContent.slice(safeColumn)
+    );
+  }, [shouldShiftForGhost, currentLineContent, aiCursorColumn, ghostFirstLine]);
 
   // Reset width when file changes to prevent stale positioning during file switches
   useLayoutEffect(() => {
@@ -50,7 +77,7 @@ const GitBlameLayerComponent = ({
     if (measureRef.current) {
       setLineContentWidth(measureRef.current.offsetWidth);
     }
-  }, [currentLineContent, fontSize, fontFamily, tabSize, filePath]);
+  }, [effectiveLineContent, fontSize, fontFamily, tabSize, filePath]);
 
   // Calculate position only when we have valid data
   const shouldShowBlame = blameLine && lineContentWidth > 0;
@@ -95,7 +122,7 @@ const GitBlameLayerComponent = ({
           tabSize,
         }}
       >
-        {currentLineContent}
+        {effectiveLineContent}
       </span>
 
       {shouldShowBlame && (
