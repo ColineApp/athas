@@ -40,10 +40,6 @@ function convertLanguageManifest(manifest: LanguageManifestFile): ExtensionManif
     ext.startsWith(".") ? ext : `.${ext}`,
   );
 
-  // Extract parser name from wasmPath
-  // "/tree-sitter/parsers/tree-sitter-javascript.wasm" -> "tree-sitter-javascript.wasm"
-  const wasmFileName = languageProvider.wasmPath.split("/").pop() || "";
-
   return {
     id: manifest.id,
     name: manifest.name,
@@ -62,7 +58,7 @@ function convertLanguageManifest(manifest: LanguageManifestFile): ExtensionManif
     activationEvents: [`onLanguage:${languageProvider.id}`],
     // Extension is downloadable from CDN
     installation: {
-      downloadUrl: `${CDN_BASE_URL}/parsers/${wasmFileName}`,
+      downloadUrl: `${CDN_BASE_URL}/${languageProvider.id}/parser.wasm`,
       size: 0, // Will be determined during download
       checksum: "", // Will be calculated after download
       minEditorVersion: "0.1.0",
@@ -118,12 +114,12 @@ export function getLanguageExtensionByFileExt(fileExt: string): ExtensionManifes
  * Get WASM download URL for a language
  */
 export function getWasmUrlForLanguage(languageId: string): string {
-  return `${CDN_BASE_URL}/parsers/tree-sitter-${languageId}.wasm`;
+  return `${CDN_BASE_URL}/${languageId}/parser.wasm`;
 }
 
 /**
  * Get highlight query URL for a language
  */
 export function getHighlightQueryUrl(languageId: string): string {
-  return `${CDN_BASE_URL}/queries/${languageId}/highlights.scm`;
+  return `${CDN_BASE_URL}/${languageId}/highlights.scm`;
 }
