@@ -17,13 +17,26 @@ const TRIGGER_CHAR_REGEX = /[\s)\]}.,;:>]/;
 const DEFAULT_MAX_TOKENS = 60;
 const DEFAULT_TEMPERATURE = 0.3;
 
-// Context window sizes - keep them small and focused
-const PREFIX_LINES = 50; // Lines before cursor for immediate context
-const SUFFIX_LINES = 10; // Lines after cursor
+// Context window sizes - balanced prefix/suffix like Void (~25 lines each)
+const PREFIX_LINES = 25; // Lines before cursor
+const SUFFIX_LINES = 25; // Lines after cursor
 const MAX_LINE_LENGTH = 200; // Truncate very long lines
-const RECENT_FILES_MAX = 3; // Max recently opened files to include
-const RECENT_FILE_SNIPPET_LINES = 15; // Lines to include from each recent file
-const FULL_FILE_LINE_THRESHOLD = 1500; // Files under this get full context
+const FULL_FILE_LINE_THRESHOLD = 500; // Only small files get full context
+
+// Cross-file context settings (inspired by Kilo)
+const RELATED_FILES_MAX = 2; // Max related files to include
+const RELATED_FILE_SNIPPET_LINES = 10; // Lines per related file
+const CROSS_FILE_CONTEXT_ENABLED = true; // Toggle cross-file context
+
+// Prediction types based on cursor context (inspired by Void)
+type PredictionType =
+  | "single-line-fill-middle" // Mid-line completion
+  | "single-line-redo-suffix" // Few chars after cursor, ignore suffix
+  | "multi-line" // Empty line or after accepted completion
+  | "do-not-predict"; // Skip prediction
+
+// Chars threshold for ignoring suffix
+const SUFFIX_IGNORE_THRESHOLD = 3;
 
 const isMarkdownFile = (filePath?: string | null, language?: string | null): boolean => {
   if (language?.toLowerCase().includes("markdown")) return true;
@@ -42,6 +55,48 @@ const getDocumentType = (buffer?: Buffer | null): "plaintext" | "markdown" | "co
   if (isMarkdownFile(buffer.path, buffer.language ?? null)) return "markdown";
   if (isPlaintextFile(buffer.path, buffer.language ?? null)) return "plaintext";
   return "code";
+};
+
+/**
+ * Determine the prediction type based on cursor context (inspired by Void).
+ * This helps decide what kind of completion to generate.
+ */
+const getPredictionType = (
+  lineContent: string,
+  cursorColumn: number,
+  justAccepted: boolean,
+): PredictionType => {
+  const beforeCursor = lineContent.slice(0, cursorColumn);
+  const afterCursor = lineContent.slice(cursorColumn);
+  const trimmedBefore = beforeCursor.trim();
+  const trimmedAfter = afterCursor.trim();
+
+  // No prefix on line → don't predict (user hasn't started typing)
+  if (trimmedBefore.length === 0 && trimmedAfter.length === 0) {
+    return "multi-line"; // Empty line, could be starting a new block
+  }
+
+  // Just accepted a completion → continue with multi-line
+  if (justAccepted) {
+    return "multi-line";
+  }
+
+  // Few chars after cursor → ignore suffix and complete the line
+  if (trimmedAfter.length > 0 && trimmedAfter.length <= SUFFIX_IGNORE_THRESHOLD) {
+    return "single-line-redo-suffix";
+  }
+
+  // Mid-line with content after cursor → fill-middle
+  if (trimmedAfter.length > SUFFIX_IGNORE_THRESHOLD) {
+    return "single-line-fill-middle";
+  }
+
+  // At end of line with prefix → single-line fill
+  if (trimmedBefore.length > 0 && trimmedAfter.length === 0) {
+    return "single-line-fill-middle";
+  }
+
+  return "single-line-fill-middle";
 };
 
 const getLanguageFromPath = (filePath?: string | null): string => {
@@ -282,25 +337,8 @@ const buildFIMContext = (
 };
 
 /**
- * Format suggestion history as a comment block for context.
- */
-const formatSuggestionHistory = (history?: SuggestionHistoryEntry[]): string => {
-  if (!history || history.length === 0) return "";
-
-  const historyLines = history
-    .slice(0, 5) // Only include last 5 for brevity
-    .map((entry, i) => {
-      // Truncate long suggestions and escape newlines
-      const shortSuggestion = entry.suggestion.replace(/\n/g, "\\n").slice(0, 60);
-      return `//   ${i + 1}. (line ${entry.line + 1}) "${shortSuggestion}${entry.suggestion.length > 60 ? "..." : ""}"`;
-    });
-
-  return ["// Recent completions in this file:", ...historyLines, ""].join("\n");
-};
-
-/**
  * Build full file context for small files.
- * Metadata in header comment, clean code without line numbers.
+ * Minimal metadata header, clean code without line numbers.
  */
 const buildFullFileContext = (
   lines: string[],
@@ -308,24 +346,14 @@ const buildFullFileContext = (
   linePrefix: string,
   lineSuffix: string,
   fileName: string,
-  directory: string,
+  _directory: string,
   language: string,
-  suggestionHistory?: SuggestionHistoryEntry[],
+  _suggestionHistory?: SuggestionHistoryEntry[],
 ): { prefix: string; suffix: string } => {
   const totalLines = lines.length;
 
-  // Build structured header as a comment (won't affect code output)
-  const historySection = formatSuggestionHistory(suggestionHistory);
-  const header = [
-    `// File: ${fileName}`,
-    `// Path: ${directory || "."}`,
-    `// Language: ${language}`,
-    `// Lines: ${totalLines} | Cursor: line ${cursorLine + 1}, col ${linePrefix.length + 1}`,
-    "",
-    historySection,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  // Minimal header - just essential file info
+  const header = `// ${fileName} (${language})\n`;
 
   // Build prefix: all lines before cursor + current line up to cursor
   // NO line numbers - just clean code
@@ -365,9 +393,9 @@ const buildWindowedContext = (
   linePrefix: string,
   lineSuffix: string,
   fileName: string,
-  directory: string,
+  _directory: string,
   language: string,
-  suggestionHistory?: SuggestionHistoryEntry[],
+  _suggestionHistory?: SuggestionHistoryEntry[],
 ): { prefix: string; suffix: string } => {
   const totalLines = lines.length;
 
@@ -394,18 +422,8 @@ const buildWindowedContext = (
   const prefixStartLine = Math.min(blockStartLine, Math.max(0, cursorLine - PREFIX_LINES));
   const suffixEndLine = Math.min(totalLines, cursorLine + 1 + SUFFIX_LINES);
 
-  // Build header as comment (metadata only)
-  const historySection = formatSuggestionHistory(suggestionHistory);
-  const header = [
-    `// File: ${fileName}`,
-    `// Path: ${directory || "."}`,
-    `// Language: ${language}`,
-    `// Lines: ${totalLines} (showing ${prefixStartLine + 1}-${suffixEndLine}) | Cursor: line ${cursorLine + 1}, col ${linePrefix.length + 1}`,
-    "",
-    historySection,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  // Minimal header - just essential file info
+  const header = `// ${fileName} (${language})\n`;
 
   // Build prefix - clean code, no line numbers
   const prefixParts: string[] = [header];
@@ -431,37 +449,155 @@ const buildWindowedContext = (
 };
 
 /**
- * Collect snippets from recently opened files (excluding current file).
- * Similar to Tabby's collectSnippetsFromRecentOpenedFiles.
+ * Extract import paths from code content.
+ * Supports: import from, require(), dynamic import()
  */
-const _collectRecentFileSnippets = (
-  buffers: Buffer[],
-  currentBufferId: string | null | undefined,
-): Array<{ filepath: string; body: string }> => {
-  const snippets: Array<{ filepath: string; body: string }> = [];
+const extractImportPaths = (content: string): string[] => {
+  const imports: string[] = [];
+  const patterns = [
+    /import\s+(?:[\w\s{},*]+\s+from\s+)?['"]([^'"]+)['"]/g, // ES imports
+    /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g, // CommonJS require
+    /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g, // Dynamic import
+  ];
 
-  // Get recently accessed buffers (excluding current)
-  const recentBuffers = buffers
+  for (const pattern of patterns) {
+    const matches = content.matchAll(pattern);
+    for (const match of matches) {
+      const importPath = match[1];
+      // Only include relative imports (likely in same project)
+      if (importPath?.startsWith(".") || importPath?.startsWith("@/")) {
+        imports.push(importPath);
+      }
+    }
+  }
+
+  return [...new Set(imports)]; // Deduplicate
+};
+
+/**
+ * Check if two file paths are related (same directory or imported).
+ */
+const areFilesRelated = (
+  currentPath: string,
+  otherPath: string,
+  importPaths: string[],
+): boolean => {
+  // Same directory
+  const currentDir = currentPath.split("/").slice(0, -1).join("/");
+  const otherDir = otherPath.split("/").slice(0, -1).join("/");
+  if (currentDir === otherDir) return true;
+
+  // Check if other file matches any import path
+  const otherFileName =
+    otherPath
+      .split("/")
+      .pop()
+      ?.replace(/\.[^.]+$/, "") || "";
+  for (const importPath of importPaths) {
+    const importName =
+      importPath
+        .split("/")
+        .pop()
+        ?.replace(/\.[^.]+$/, "") || "";
+    if (importName === otherFileName) return true;
+    // Handle @/ alias - check if path ends match
+    if (importPath.startsWith("@/") && otherPath.includes(importPath.slice(2))) return true;
+  }
+
+  return false;
+};
+
+/**
+ * Collect context snippets from related files (inspired by Kilo).
+ * Prioritizes: 1) Imported files, 2) Same directory files, 3) Same extension
+ */
+const collectRelatedFileSnippets = (
+  buffers: Buffer[],
+  currentBuffer: Buffer | null,
+): Array<{ filepath: string; body: string; score: number }> => {
+  if (!CROSS_FILE_CONTEXT_ENABLED || !currentBuffer?.path || !currentBuffer.content) {
+    return [];
+  }
+
+  const importPaths = extractImportPaths(currentBuffer.content);
+  const currentExt = currentBuffer.path.split(".").pop()?.toLowerCase();
+  const snippets: Array<{ filepath: string; body: string; score: number }> = [];
+
+  // Score and filter buffers
+  const scoredBuffers = buffers
     .filter((b) => {
-      if (b.id === currentBufferId) return false;
+      if (b.id === currentBuffer.id) return false;
       if (shouldSkipBuffer(b)) return false;
-      if (!b.content || b.content.length === 0) return false;
+      if (!b.content || !b.path || b.content.length === 0) return false;
       return true;
     })
-    .slice(0, RECENT_FILES_MAX);
+    .map((b) => {
+      let score = 0;
+      const otherExt = b.path?.split(".").pop()?.toLowerCase();
 
-  for (const buffer of recentBuffers) {
+      // Higher score for related files
+      if (areFilesRelated(currentBuffer.path!, b.path!, importPaths)) {
+        score += 10;
+      }
+
+      // Bonus for same extension
+      if (currentExt && otherExt === currentExt) {
+        score += 5;
+      }
+
+      // Small bonus for recently accessed (based on array position as proxy)
+      score += 1;
+
+      return { buffer: b, score };
+    })
+    .filter((item) => item.score >= 5) // Only include somewhat related files
+    .sort((a, b) => b.score - a.score)
+    .slice(0, RELATED_FILES_MAX);
+
+  for (const { buffer, score } of scoredBuffers) {
     if (!buffer.content || !buffer.path) continue;
 
     const lines = buffer.content.split("\n");
-    // Take first N lines as a snippet (could be smarter with cursor position tracking)
-    const snippetLines = lines.slice(0, RECENT_FILE_SNIPPET_LINES);
-    const body = snippetLines.join("\n");
+    // Take imports + first functions/classes (more useful than just first N lines)
+    const snippetLines: string[] = [];
+    let inImports = true;
 
+    for (let i = 0; i < lines.length && snippetLines.length < RELATED_FILE_SNIPPET_LINES; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      // Always include imports
+      if (
+        inImports &&
+        (trimmed.startsWith("import") || trimmed.startsWith("from") || trimmed === "")
+      ) {
+        snippetLines.push(line);
+        continue;
+      }
+      inImports = false;
+
+      // Include function/class/const declarations
+      if (
+        trimmed.startsWith("export") ||
+        trimmed.startsWith("function") ||
+        trimmed.startsWith("class") ||
+        trimmed.startsWith("const") ||
+        trimmed.startsWith("interface") ||
+        trimmed.startsWith("type") ||
+        trimmed.startsWith("def ") ||
+        trimmed.startsWith("fn ") ||
+        trimmed.startsWith("pub ")
+      ) {
+        snippetLines.push(line);
+      }
+    }
+
+    const body = snippetLines.join("\n");
     if (body.trim().length > 0) {
       snippets.push({
         filepath: buffer.path,
-        body: truncateLine(body, undefined),
+        body,
+        score,
       });
     }
   }
@@ -656,9 +792,37 @@ export const useAiAutocomplete = ({
         const nextNewline = latestContent.indexOf("\n", cursorOffset);
         return nextNewline === -1 ? latestContent.length : nextNewline;
       })();
+
+      // Get current line content for prediction type analysis
+      const lineStartIndex = (() => {
+        const prevNewline = latestContent.lastIndexOf("\n", cursorOffset - 1);
+        return prevNewline === -1 ? 0 : prevNewline + 1;
+      })();
+      const currentLineContent = latestContent.slice(lineStartIndex, lineEndIndex);
+      const cursorColumnInLine = cursorOffset - lineStartIndex;
+
+      // Determine if we just accepted a suggestion (for multi-line continuations)
+      const justAccepted = lastAcceptedAt > 0 && Date.now() - lastAcceptedAt < 1000;
+
+      // Get prediction type based on cursor context
+      const predictionType = getPredictionType(
+        currentLineContent,
+        cursorColumnInLine,
+        justAccepted,
+      );
+      console.log("[AI Autocomplete] prediction type", {
+        predictionType,
+        currentLineContent,
+        cursorColumnInLine,
+      });
+
+      // For single-line-fill-middle with significant suffix, be more conservative
       const lineTail = latestContent.slice(cursorOffset, lineEndIndex);
-      if (lineTail.trim().length > 0) {
-        console.log("[AI Autocomplete] skip: cursor not at end of line");
+      if (
+        predictionType === "single-line-fill-middle" &&
+        lineTail.trim().length > SUFFIX_IGNORE_THRESHOLD
+      ) {
+        console.log("[AI Autocomplete] skip: mid-line with significant suffix");
         return;
       }
       const charBeforeCursor = cursorOffset > 0 ? latestContent[cursorOffset - 1] : "";
@@ -732,9 +896,9 @@ export const useAiAutocomplete = ({
           suggestionHistory,
         );
 
-        // NOTE: Cross-file context disabled - was polluting suggestions with unrelated code
-        // const allBuffers = useBufferStore.getState().buffers;
-        // const recentlyOpenedSnippets = collectRecentFileSnippets(allBuffers, bufferId);
+        // Collect related file snippets (imports, same directory, same extension)
+        const allBuffers = useBufferStore.getState().buffers;
+        const relatedSnippets = collectRelatedFileSnippets(allBuffers, latestBuffer ?? null);
 
         const request = {
           // Send ONLY the FIM context, not the full file
@@ -749,9 +913,13 @@ export const useAiAutocomplete = ({
             // FIM context (preferred by modern models)
             prefix: fimContext.prefix,
             suffix: fimContext.suffix,
+            // Prediction type hint for the model
+            predictionType,
             // File info
             filepath: latestBuffer?.path || undefined,
             language: getLanguageFromPath(latestBuffer?.path),
+            // Related files context (inspired by Kilo)
+            relatedFiles: relatedSnippets.length > 0 ? relatedSnippets : undefined,
             // Filtering
             rejectedSuggestions,
           },
