@@ -629,8 +629,8 @@ export const useAiAutocomplete = ({
 }: UseAiAutocompleteOptions) => {
   const aiCompletionEnabled = useEditorUIStore.use.aiCompletion();
   const lastInputTimestamp = useEditorUIStore.use.lastInputTimestamp();
-  const selection = useEditorStateStore.use.selection();
-  const multiCursorState = useEditorStateStore.use.multiCursorState();
+  const selection = useEditorStateStore.use.selection?.();
+  const multiCursorState = useEditorStateStore.use.multiCursorState?.();
   const autocompleteProviderId = useSettingsStore(
     (state) => state.settings.aiAutocompleteProviderId,
   );
