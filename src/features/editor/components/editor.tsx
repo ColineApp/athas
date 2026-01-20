@@ -685,7 +685,7 @@ export function Editor({
             // Get the new content after insertion
             const newContent = textarea.value;
             handleInput(newContent);
-            aiCompletionActions.clearSuggestion();
+            aiCompletionActions.clearSuggestion({ accepted: true });
             return;
           }
 
@@ -711,7 +711,7 @@ export function Editor({
                 cursorColumn: newPosition.column,
               });
             } else {
-              aiCompletionActions.clearSuggestion();
+              aiCompletionActions.clearSuggestion({ accepted: true });
             }
             return;
           }

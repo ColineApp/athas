@@ -1,11 +1,33 @@
 export type AutocompleteDocumentType = "plaintext" | "markdown" | "code";
 
+/** Snippet from another file for cross-file context */
+export interface ContextSnippet {
+  filepath: string;
+  body: string;
+  score?: number;
+}
+
 export interface AutocompleteContext {
   documentType?: AutocompleteDocumentType;
   boxiaEntityType?: string;
   boxiaEntityField?: string;
+
+  // FIM (Fill-in-Middle) context - clean prefix/suffix for models that support it
+  prefix?: string;
+  suffix?: string;
+
+  // Current file info
+  filepath?: string;
+  language?: string;
+
+  // Legacy fields (for backwards compat)
   cursorContext?: string;
   recentText?: string[];
+
+  // Cross-file context (like Tabby's recently opened files)
+  recentlyOpenedSnippets?: ContextSnippet[];
+
+  // Completion filtering
   rejectedSuggestions?: string[];
 }
 

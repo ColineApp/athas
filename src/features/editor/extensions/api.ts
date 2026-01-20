@@ -1,4 +1,5 @@
 import { EDITOR_CONSTANTS } from "../config/constants";
+import { useAiCompletionStore } from "../stores/ai-completion-store";
 import { useBufferStore } from "../stores/buffer-store";
 import { useEditorDecorationsStore } from "../stores/decorations-store";
 import { useHistoryStore } from "../stores/history-store";
@@ -450,6 +451,9 @@ class EditorAPIImpl implements EditorAPI {
     const entry = historyStore.actions.undo(activeBufferId);
 
     if (entry) {
+      // Mark undo happened to prevent AI autocomplete from triggering
+      useAiCompletionStore.getState().actions.setLastUndoRedoAt(Date.now());
+
       // Restore content
       bufferStore.actions.updateBufferContent(activeBufferId, entry.content, false);
 
@@ -481,6 +485,9 @@ class EditorAPIImpl implements EditorAPI {
     const entry = historyStore.actions.redo(activeBufferId);
 
     if (entry) {
+      // Mark redo happened to prevent AI autocomplete from triggering
+      useAiCompletionStore.getState().actions.setLastUndoRedoAt(Date.now());
+
       // Restore content
       bufferStore.actions.updateBufferContent(activeBufferId, entry.content, false);
 
