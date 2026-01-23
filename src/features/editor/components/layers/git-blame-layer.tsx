@@ -4,8 +4,8 @@ import { useAiCompletionStore } from "@/features/editor/stores/ai-completion-sto
 import { useBufferStore } from "@/features/editor/stores/buffer-store";
 import { useEditorStateStore } from "@/features/editor/stores/state-store";
 import { splitLines } from "@/features/editor/utils/lines";
-import { InlineGitBlame } from "@/features/version-control/git/components/inline-blame";
-import { useGitBlame } from "@/features/version-control/git/controllers/use-blame";
+import { InlineGitBlame } from "@/features/git/components/inline-blame";
+import { useGitBlame } from "@/features/git/hooks/use-blame";
 
 interface GitBlameLayerProps {
   filePath: string;
